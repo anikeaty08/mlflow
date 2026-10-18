@@ -873,7 +873,8 @@ def test_service_name_propagated_to_root_span(mlflow_server: str):
     assert child_span.get_attribute("service.name") is None
 
 
-def test_otlp_json_encoding(mlflow_server: str):
+@pytest.mark.parametrize("content_type", ["application/json", "application/json; charset=utf-8"])
+def test_otlp_json_encoding(mlflow_server: str, content_type: str):
     mlflow.set_tracking_uri(mlflow_server)
     experiment = mlflow.set_experiment("otel-json-encoding-test")
     experiment_id = experiment.experiment_id
@@ -917,12 +918,14 @@ def test_otlp_json_encoding(mlflow_server: str):
         f"{mlflow_server}/v1/traces",
         json=payload,
         headers={
-            "Content-Type": "application/json",
+            "Content-Type": content_type,
             MLFLOW_EXPERIMENT_ID_HEADER: experiment_id,
         },
         timeout=10,
     )
     assert response.status_code == 200
+    assert response.headers["content-type"] == "application/json"
+    assert response.json() == {}
 
     traces = mlflow.search_traces(locations=[experiment_id], include_spans=True, return_type="list")
     assert len(traces) == 1

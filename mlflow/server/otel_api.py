@@ -19,6 +19,7 @@ import time
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from google.protobuf.json_format import Error as ProtoJsonError
+from google.protobuf.json_format import MessageToJson
 from google.protobuf.json_format import Parse as ParseJsonProto
 from google.protobuf.message import DecodeError
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
@@ -121,15 +122,14 @@ async def export_traces(
     """
     Export trace spans to MLflow via the OpenTelemetry protocol.
 
-    This endpoint accepts OTLP/HTTP protobuf trace export requests.
-    Protobuf format reference: https://opentelemetry.io/docs/specs/otlp/#binary-protobuf-encoding
+    This endpoint accepts OTLP/HTTP trace export requests in protobuf or JSON format.
 
     Note: All spans in the batch are persisted in a single log_spans() call. If that
     call fails, the entire batch is rejected (all-or-nothing). Partial-success is not
     supported; clients that need per-trace error isolation should batch by trace.
 
     Args:
-        request: OTel ExportTraceServiceRequest in protobuf format
+        request: OTel ExportTraceServiceRequest in protobuf or JSON format
         x_mlflow_experiment_id: Required header containing the experiment ID
         x_mlflow_run_id: Optional header containing the run ID to associate with ingested traces
         content_type: Content-Type header from the request
@@ -138,7 +138,7 @@ async def export_traces(
         x_mlflow_workspace: Optional workspace header if using MLflow workspaces
 
     Returns:
-        FastAPI Response with ExportTraceServiceResponse in protobuf format
+        FastAPI Response with ExportTraceServiceResponse in the request's format
 
     Raises:
         HTTPException: If the request is invalid or span logging fails
@@ -290,12 +290,16 @@ async def export_traces(
 
                 _record_event(TracesReceivedByServerEvent, event_params)
 
-        # Return protobuf response as per OTLP specification
+        # OTLP/HTTP responses use the same encoding as their requests.
         response_message = ExportTraceServiceResponse()
-        response_bytes = response_message.SerializeToString()
+        response_body = (
+            MessageToJson(response_message)
+            if media_type == "application/json"
+            else response_message.SerializeToString()
+        )
         return Response(
-            content=response_bytes,
-            media_type="application/x-protobuf",
+            content=response_body,
+            media_type=media_type,
             status_code=200,
         )
     finally:
